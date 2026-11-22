@@ -218,11 +218,11 @@ function stateFile() {
  * @param {object} ctx
  * @returns {{ ok: true, roots: Array<object>, skills: Array<object>, summary: object, statePath: string }}
  */
-function skillSnapshot(ctx) {
+async function skillSnapshot(ctx) {
   const state = readSkillState(stateDir())
   const roots = skillRoots({
     projectRoots: projectRootsOf(ctx),
-    pluginRoots: pluginSkillPackages(nodeModulesRootOf(ctx)),
+    pluginRoots: pluginSkillPackages(await nodeModulesRootOf(ctx)),
   })
   const scanned = scanSkills(roots)
   const resolved = resolveWinners(scanned.skills)
@@ -662,17 +662,20 @@ const skillNodeModulesCache = { at: 0, value: null }
  * (no file:// module) there is nothing to derive from and null is honest.
  *
  * @param {object} ctx
- * @returns {string|null}
+ * @returns {Promise<string|null>}
  */
-function nodeModulesRootOf(ctx) {
+async function nodeModulesRootOf(ctx) {
   const cache = skillNodeModulesCache
   const now = Date.now()
   if (cache.value !== undefined && now - cache.at < 60_000) return cache.value
   /** @type {string|null} */
   let root = null
   try {
+    // listPlugins() is async. Calling it without await yields a Promise, and
+    // Array.isArray(Promise) is false — which silently produced "no packages"
+    // and hid every bundled skill.
     const rows = ctx.pluginManager !== undefined && typeof ctx.pluginManager.listPlugins === 'function'
-      ? ctx.pluginManager.listPlugins()
+      ? await ctx.pluginManager.listPlugins()
       : null
     const named = Array.isArray(rows) ? rows.map(row => ({ moduleName: typeof row?.moduleName === 'string' ? row.moduleName : '' })) : []
     const dir = profileDir(named)
@@ -4557,7 +4560,7 @@ async function handle(ctx, req, res) {
   }
   // 技能：本插件自己扫描、自己存开关。不依赖任何别的插件。
   if (method === 'GET' && path === '/skills') {
-    return send(res, 200, skillSnapshot(ctx))
+    return send(res, 200, await skillSnapshot(ctx))
   }
   if (method === 'POST' && path === '/skills/toggle') {
     const body = await readJsonBody(req)
@@ -4567,14 +4570,14 @@ async function handle(ctx, req, res) {
       return send(res, 400, { ok: false, message: 'enabled must be a boolean' })
     }
     const result = setSkillEnabled(ctx, name, enabled)
-    return send(res, 200, { ...result, ...skillSnapshot(ctx) })
+    return send(res, 200, { ...result, ...(await skillSnapshot(ctx)) })
   }
   if (method === 'POST' && path === '/skills/note') {
     const body = await readJsonBody(req)
     const name = body !== null && typeof body === 'object' ? body.name : null
     const note = body !== null && typeof body === 'object' ? body.note : ''
     const result = setSkillNote(ctx, name, note)
-    return send(res, 200, { ...result, ...skillSnapshot(ctx) })
+    return send(res, 200, { ...result, ...(await skillSnapshot(ctx)) })
   }
   // 上一次/正在跑的更新任务。面板可能在中途被关掉，回来时靠这个续上进度。
   if (method === 'GET' && path === '/job') {
@@ -4797,10 +4800,13 @@ export function apply(ctx) {
     if (skills === undefined || typeof skills.registerProvider !== 'function') return () => {}
     const provider = createSkillPolicyProvider({
       read: () => readSkillState(stateDir()),
-      scan: () =>
+      scan: async () =>
         resolveWinners(
           scanSkills(
-            skillRoots({ projectRoots: projectRootsOf(ctx), pluginRoots: pluginSkillPackages(nodeModulesRootOf(ctx)) }),
+            skillRoots({
+              projectRoots: projectRootsOf(ctx),
+              pluginRoots: pluginSkillPackages(await nodeModulesRootOf(ctx)),
+            }),
           ).skills,
         ),
     })
