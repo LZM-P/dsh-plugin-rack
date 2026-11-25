@@ -249,6 +249,52 @@ try {
   }
 }
 
+// ── bundled skills present as one group, not one group per package ─────────
+// Each package needs its own root to be scanned, but a group per package reads
+// as five columns all labelled "plugins". The snapshot merges them.
+{
+  const workspace = mkdtempSync(join(tmpdir(), 'rack-skills-groups-'))
+  try {
+    const nm = join(workspace, 'node_modules')
+    const mk = (pkg, name) => {
+      const dir = join(nm, pkg, 'skills', name)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'SKILL.md'), '---\nname: ' + name + '\ndescription: Bundled.\n---\n\nBody.\n')
+    }
+    mk('alpha-plugin', 'one')
+    mk('beta-plugin', 'two')
+    mk('@scope/gamma-plugin', 'three')
+
+    const packages = pluginSkillPackages(nm)
+    eq(packages.length, 3, 'three packages ship skills')
+    const roots = skillRoots({
+      dshHome: join(workspace, 'empty-dsh'),
+      agentsHome: join(workspace, 'empty-agents'),
+      projectRoots: [],
+      pluginRoots: packages,
+    })
+    const scanned = scanSkills(roots)
+    eq(
+      scanned.skills.filter((s) => String(s.rootKey).startsWith('plugin:')).length,
+      3,
+      'scanning still reports every bundled skill separately',
+    )
+    check(
+      scanned.roots.filter((r) => r.scope === 'plugin').length === 3,
+      'one scan root per package, because each has its own skills/ directory',
+    )
+    // The merge the snapshot applies: one bucket for every plugin root.
+    const keys = new Set(
+      scanned.skills
+        .filter((s) => String(s.rootKey).startsWith('plugin:'))
+        .map(() => 'plugins'),
+    )
+    eq(keys.size, 1, 'all bundled skills collapse into a single display group')
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
+  }
+}
+
 if (failures > 0) {
   console.error('SKILLS_FAIL ' + failures + '/' + checks)
   process.exit(1)

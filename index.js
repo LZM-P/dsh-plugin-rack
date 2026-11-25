@@ -227,12 +227,31 @@ async function skillSnapshot(ctx) {
   const scanned = scanSkills(roots)
   const resolved = resolveWinners(scanned.skills)
   const skills = applySkillState(resolved, state)
+  // 插件包一个包一个根，扫的时候必须分开（每个包各有自己的 skills/ 目录）。
+  // 但面板是一根一个分组，五个包就是五个都叫 plugins 的组，读起来像出了错。
+  // 这里按 scope 合并：插件技能仍各自保留真实路径与 rootKey，只是归到同一个
+  // 展示桶里。合并只发生在返回给界面的形状上，扫描与开关判定不受影响。
   const byRoot = new Map()
-  for (const root of scanned.roots) byRoot.set(root.key, { ...root, skills: [] })
+  const pluginBucket = {
+    key: 'plugins',
+    label: 'plugins',
+    path: pluginRootsLabel(scanned.roots),
+    scope: 'plugin',
+    rank: 600,
+    exists: true,
+    skills: [],
+  }
+  for (const root of scanned.roots) {
+    if (root.scope === 'plugin') continue
+    byRoot.set(root.key, { ...root, skills: [] })
+  }
   for (const skill of skills) {
-    const bucket = byRoot.get(skill.rootKey)
+    const bucket = skill.rootKey !== undefined && String(skill.rootKey).startsWith('plugin:')
+      ? pluginBucket
+      : byRoot.get(skill.rootKey)
     if (bucket !== undefined) bucket.skills.push(skill)
   }
+  if (pluginBucket.skills.length > 0) byRoot.set(pluginBucket.key, pluginBucket)
   for (const bucket of byRoot.values()) {
     bucket.skills.sort((a, b) => a.name.localeCompare(b.name))
   }
@@ -686,6 +705,27 @@ async function nodeModulesRootOf(ctx) {
   skillNodeModulesCache.at = now
   skillNodeModulesCache.value = root
   return root
+}
+
+/**
+ * One line describing where the plugin-bundled skills came from.
+ *
+ * The panel renders a single "plugins" group, so its path line cannot be one
+ * package's directory. Instead it says how many packages were scanned and where
+ * they live, and the per-skill detail still shows each skill's own path.
+ *
+ * @param {Array<{ scope?: string, path: string }>} roots
+ * @returns {string}
+ */
+function pluginRootsLabel(roots) {
+  const dirs = roots.filter(root => root.scope === 'plugin').map(root => root.path)
+  if (dirs.length === 0) return 'node_modules'
+  if (dirs.length === 1) return dirs[0]
+  // Common prefix keeps the line short without hiding which profile it is.
+  const head = dirs[0].slice(0, dirs[0].length - '\\skills'.length)
+  const cut = head.lastIndexOf('node_modules')
+  const base = cut >= 0 ? head.slice(0, cut + 'node_modules'.length) : head
+  return base + ' (' + String(dirs.length) + ' packages)'
 }
 
 /** Longest subtitle we keep; the row already ellipsizes, this keeps the payload small. */
