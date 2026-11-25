@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-rack",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "type": "module",
   "description": "DSH 插件管理：所有插件一屏看完，一个开关直接开关，更新完自动热替换不用重启。/ Plugin rack for DSH: every plugin in one list with a power switch, an auto/manual flag that scopes the one-click bulk actions, and hot-swapped updates that need no restart.",
   "author": "Jaside (LZM-P)",
